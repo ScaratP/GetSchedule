@@ -48,7 +48,7 @@ fun WebScraperScreen(title: String, schedule: List<String>) {
     }
 }
 
-suspend fun fetchWebData(url: String, cookies: String?): List<String> {
+fun fetchWebData(url: String, cookies: String?): List<String> {
     return try {
         val doc: Document = Jsoup.connect(url).apply {
             cookies?.let { header("Cookie", it) }
@@ -58,7 +58,7 @@ suspend fun fetchWebData(url: String, cookies: String?): List<String> {
 
         val titles = doc.select("span").mapNotNull { it.attr("title").takeIf { it.isNotEmpty() } }
 
-        Log.d("WebScraper", "Title: ${doc.title()}")
+        Log.d("WebScraper", "Page Title: ${doc.title()}")
         titles.forEach { Log.d("WebScraper", "Title: $it") }
 
         titles
@@ -67,6 +67,7 @@ suspend fun fetchWebData(url: String, cookies: String?): List<String> {
         emptyList()
     }
 }
+
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
