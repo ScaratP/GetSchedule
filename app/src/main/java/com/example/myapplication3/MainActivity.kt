@@ -35,39 +35,60 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun WebScraperScreen(title: String, schedule: List<String>) {
+fun WebScraperScreen(title: String, schedule: List<Map<String, String>>) {
     Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
         Text(text = title, fontSize = 24.sp, modifier = Modifier.padding(bottom = 8.dp))
         if (schedule.isEmpty()) {
             Text(text = "No schedule found", fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
         } else {
             schedule.forEach { item ->
-                Text(text = item, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
+                item.forEach { (key, value) ->
+                    Text(text = "$key: $value", fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
     }
 }
 
-fun fetchWebData(url: String, cookies: String?): List<String> {
-    return try {
-        val doc: Document = Jsoup.connect(url).apply {
-            cookies?.let { header("Cookie", it) }
-            userAgent("Mozilla/5.0")
-            timeout(10000)
-        }.get()
+suspend fun fetchWebData(url: String, cookies: String?): List<Map<String, String>> {
+    return withContext(Dispatchers.IO) {
+        try {
+            val doc: Document = Jsoup.connect(url).apply {
+                cookies?.let { header("Cookie", it) }
+                userAgent("Mozilla/5.0")
+                timeout(10000)
+            }.get()
 
-        val titles = doc.select("span").mapNotNull { it.attr("title").takeIf { it.isNotEmpty() } }
+            val titles = doc.select("span").mapNotNull { it.attr("title").takeIf { it.isNotEmpty() } }
 
-        Log.d("WebScraper", "Page Title: ${doc.title()}")
-        titles.forEach { Log.d("WebScraper", "Title: $it") }
+            Log.d("WebScraper", "Page Title: ${doc.title()}")
+            titles.forEach { Log.d("WebScraper", "Title: $it") }
 
-        titles
-    } catch (e: Exception) {
-        Log.e("WebScraper", "Error fetching data", e)
-        emptyList()
+            titles.map { parseTitle(it) }
+        } catch (e: Exception) {
+            Log.e("WebScraper", "Error fetching data", e)
+            emptyList()
+        }
     }
 }
 
+fun parseTitle(title: String): Map<String, String> {
+    val regexMap = mapOf(
+        "科目名稱" to """科目名稱：(.+?)\n""",
+        "場地" to """場地：(.+?)\n"""
+    )
+
+    val result = mutableMapOf<String, String>()
+    regexMap.forEach { (key, pattern) ->
+        val regex = Regex(pattern)
+        val match = regex.find(title)
+        if (match != null) {
+            result[key] = match.groupValues.drop(1).joinToString(" ").trim()
+        }
+    }
+    return result
+}
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -96,18 +117,19 @@ fun WebViewScreen(url: String, onLoginSuccess: (String) -> Unit) {
 @Composable
 fun ScheduleScreen() {
     var cookies by remember { mutableStateOf<String?>(null) }
-    var scheduleList by remember { mutableStateOf<List<String>>(emptyList()) }
+    var scheduleList by remember { mutableStateOf<List<Map<String, String>>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(cookies) {
-        cookies?.let {
+        if (cookies != null) {
             isLoading = true
-            scheduleList = withContext(Dispatchers.IO) {
-                fetchWebData("https://infosys.nttu.edu.tw/n_CourseBase_Select/WeekCourseList.aspx?ItemParam=", it)
-            }
+            scheduleList = fetchWebData(
+                "https://infosys.nttu.edu.tw/n_CourseBase_Select/WeekCourseList.aspx?ItemParam=", cookies!!
+            )
             isLoading = false
         }
     }
+
 
     if (cookies == null) {
         WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") {
@@ -122,7 +144,10 @@ fun ScheduleScreen() {
                 Text(text = "No schedule found", fontSize = 14.sp)
             } else {
                 scheduleList.forEach { item ->
-                    Text(text = item, fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
+                    item.forEach { (key, value) ->
+                        Text(text = "$key: $value", fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         }
