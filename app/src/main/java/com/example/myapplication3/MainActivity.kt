@@ -60,18 +60,43 @@ suspend fun fetchWebData(url: String, cookies: String?): List<Map<String, String
                 timeout(10000)
             }.get()
 
-            val titles = doc.select("span").mapNotNull { it.attr("title").takeIf { it.isNotEmpty() } }
+            val table = doc.select("table.NTTU_GridView") // 選擇目標表格
+            val rows = table.select("tr") // 獲取所有行
 
-            Log.d("WebScraper", "Page Title: ${doc.title()}")
-            titles.forEach { Log.d("WebScraper", "Title: $it") }
+            val dataList = mutableListOf<Map<String, String>>()
 
-            titles.map { parseTitle(it) }
+            for ((rowIndex, row) in rows.withIndex()) { // 遍歷每一行
+                val columns = row.select("td") // 選擇該行的所有列
+                val rowData = mutableMapOf<String, String>()
+
+                for ((colIndex, column) in columns.withIndex()) { // 遍歷每一列
+                    val span = column.selectFirst("span[title]") // 取得該列內的 span (如果有)
+                    val title = span?.attr("title")?.trim() ?: "" // 獲取 title 屬性
+                    val realRowIndex=rowIndex-1
+                    val id = "$colIndex$realRowIndex" // 調整為 (colIndex)(realRowIndex)
+
+                    if (title.isNotEmpty()) {
+                        Log.d("WebScraper", "Extracted [$id]: $title") // **偵錯用，先印出 title**
+                        val parsedData = parseTitle(title)
+                        rowData[id] = parsedData.entries.joinToString { "${it.key}: ${it.value}" } // 轉為 "科目名稱: 物理, 場地: B101"
+                    }
+                }
+
+                if (rowData.isNotEmpty()) {
+                    dataList.add(rowData) // 只有當該行有資料時才加入
+                }
+            }
+
+            Log.d("WebScraper", "Final parsed data: $dataList") // **印出最後的分析結果**
+            return@withContext dataList
         } catch (e: Exception) {
             Log.e("WebScraper", "Error fetching data", e)
             emptyList()
         }
     }
 }
+
+
 
 fun parseTitle(title: String): Map<String, String> {
     val regexMap = mapOf(
