@@ -1,0 +1,101 @@
+是的，您可以利用星期和时间来构建一个二维矩阵来存储数据。实际上，这种方式是非常常见的做法，特别是当数据与特定时间或日期相关时，二维矩阵（或二维数组）非常有用。
+
+在您的情况下，您已经有了一个星期列表和时间段列表，您可以利用这两个列表的索引来创建一个矩阵，矩阵的每一行代表一个星期的某一天，每一列代表一天中的某个时间段。
+
+### 具体实现方法：
+1. **创建一个二维矩阵**，每个元素代表某个特定时间段的课程信息。
+2. **根据星期和时间将课程信息存入矩阵中**。
+3. **利用矩阵的索引来获取或展示特定时间和星期的课程**。
+
+下面是如何实现的示例代码：
+
+```kotlin
+@Composable
+fun ScheduleScreen() {
+    val weekDays = listOf("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+    val timeSlots = listOf(
+        "07:10-08:00", "08:10-09:00", "09:10-10:00", "10:10-11:00", "11:10-12:00",
+        "12:10-13:00", "13:10-14:00", "14:10-15:00", "15:10-16:00", "16:10-17:00",
+        "17:10-18:00", "18:10-19:00", "19:10-20:00", "20:10-21:00", "21:10-22:00"
+    )
+
+    var cookies by remember { mutableStateOf<String?>(null) }
+    var scheduleList by remember { mutableStateOf<List<CourseSchedule>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    val scheduleMatrix = Array(weekDays.size) { Array(timeSlots.size) { mutableListOf<CourseSchedule>() } }
+
+    LaunchedEffect(cookies) {
+        if (cookies != null) {
+            isLoading = true
+            scheduleList = fetchWebData(
+                "https://infosys.nttu.edu.tw/n_CourseBase_Select/WeekCourseList.aspx?ItemParam=", cookies!!
+            )
+            isLoading = false
+
+            // 将抓取到的课程信息存入二维矩阵中
+            scheduleList.forEach { course ->
+                val weekDayIndex = weekDays.indexOf(course.weekDay) // 找到星期对应的索引
+                val timeSlotIndex = timeSlots.indexOf(course.timeslot) // 找到时间段对应的索引
+                if (weekDayIndex != -1 && timeSlotIndex != -1) {
+                    scheduleMatrix[weekDayIndex][timeSlotIndex].add(course) // 存储课程信息
+                }
+            }
+        }
+    }
+
+    if (cookies == null) {
+        WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") {
+            cookies = it
+        }
+    } else {
+        Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+            Text(text = "Schedule", fontSize = 24.sp, modifier = Modifier.padding(bottom = 8.dp))
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+            } else {
+                scheduleMatrix.forEachIndexed { weekDayIndex, daySchedule ->
+                    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                        Text(text = weekDays[weekDayIndex], fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        daySchedule.forEachIndexed { timeSlotIndex, courses ->
+                            if (courses.isNotEmpty()) {
+                                Text(text = timeSlots[timeSlotIndex], fontSize = 14.sp)
+                                courses.forEach { course ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                                    ) {
+                                        Column(modifier = Modifier.padding(8.dp)) {
+                                            Text(text = "ID: ${course.id}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                                            Text(text = "課程: ${course.courseName}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                            Text(text = "地點: ${course.location}", fontSize = 14.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### 解释：
+1. **二维矩阵的构建**：
+   ```kotlin
+   val scheduleMatrix = Array(weekDays.size) { Array(timeSlots.size) { mutableListOf<CourseSchedule>() } }
+   ```
+   这行代码创建了一个大小为 `7x15` 的二维矩阵（7天 × 15个时间段），其中每个单元格是一个可变列表 (`mutableListOf<CourseSchedule>()`)，用于存储该时间段对应的课程。
+
+2. **填充矩阵**：
+   在 `LaunchedEffect` 中，使用 `weekDayIndex` 和 `timeSlotIndex` 来找到对应的行和列，然后将课程数据添加到矩阵的对应位置。
+   ```kotlin
+   scheduleMatrix[weekDayIndex][timeSlotIndex].add(course)
+   ```
+
+3. **显示课程数据**：
+   在 UI 中，我们通过遍历 `scheduleMatrix` 来按星期和时间段显示课程。每个矩阵元素都包含了该时间段的所有课程。
+
+这样，您就能通过二维矩阵来管理课程表，并且通过时间和星期来快速查找和展示相应的课程信息。
