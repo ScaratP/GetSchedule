@@ -11,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -60,8 +62,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-
 
 @Entity(tableName = "course_table")
 data class CourseEntity(
@@ -269,7 +269,6 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
             val fetchedData = fetchWebData(
                 "https://infosys.nttu.edu.tw/n_CourseBase_Select/WeekCourseList.aspx?ItemParam=", cookies!!
             )
-            isLoading = false
 
             viewModel.clearAllCourses() // 避免重複儲存
             fetchedData.forEach { course ->
@@ -286,43 +285,79 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
                 )
             }
             viewModel.loadAllCourses()
+            isLoading = false
         }
     }
 
+    Column {
+        Text(
+            text = "課程表",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(16.dp)
+        )
 
-    if (cookies == null) {
-        WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") {
-            cookies = it
-        }
-    } else {
-        Column(modifier = Modifier
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())) {
-            Text(text = "Schedule", fontSize = 24.sp, modifier = Modifier.padding(bottom = 8.dp))
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-            } else if (scheduleList.isEmpty()) {
-                Text(text = "No schedule found", fontSize = 14.sp)
-            } else {
-                scheduleList.forEach { course ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(text = "ID: ${course.id}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                            Text(text = "課程: ${course.courseName}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Text(text = "老師: ${course.teacherName}", fontSize = 14.sp)
-                            Text(text = "地點: ${course.location}", fontSize = 14.sp)
-                            Text(text = "星期: ${course.weekDay}", fontSize = 14.sp)
-//                            Text(text = "時間: ${course.timeslot}", fontSize = 14.sp)
-                            Text(text = "時間: ${course.startTime} - ${course.endTime}", fontSize = 14.sp)
+
+        if (scheduleList.isEmpty() && cookies == null) {
+            // **如果資料庫為空且沒有 cookies，則顯示 WebView 進行登入**
+            WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") {
+                cookies = it
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxSize()
+            ) {
+                item {
+                    Text(
+                        text = "Schedule",
+                        fontSize = 24.sp,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+
+                if (isLoading) {
+                    item {
+                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                    }
+                } else if (scheduleList.isEmpty()) {
+                    item {
+                        Text(text = "No schedule found", fontSize = 14.sp)
+                    }
+                } else {
+                    items(scheduleList) { course ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(
+                                    text = "ID: ${course.id}",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "課程: ${course.courseName}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(text = "老師: ${course.teacherName}", fontSize = 14.sp)
+                                Text(text = "地點: ${course.location}", fontSize = 14.sp)
+                                Text(text = "星期: ${course.weekDay}", fontSize = 14.sp)
+                                Text(
+                                    text = "時間: ${course.startTime} - ${course.endTime}",
+                                    fontSize = 14.sp
+                                )
+                            }
                         }
                     }
                 }
             }
+
+
         }
     }
 }
