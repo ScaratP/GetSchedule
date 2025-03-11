@@ -10,15 +10,16 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -159,11 +160,6 @@ suspend fun fetchWebData(url: String, cookies: String?): List<CourseEntity> {
             val dataList = mutableListOf<CourseEntity>()
 
             val weekDays = listOf("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
-            val timeSlots = listOf(
-                "07:10-08:00", "08:10-09:00", "09:10-10:00", "10:10-11:00", "11:10-12:00",
-                "12:10-13:00", "13:10-14:00", "14:10-15:00", "15:10-16:00", "16:10-17:00",
-                "17:10-18:00", "18:10-19:00", "19:10-20:00", "20:10-21:00", "21:10-22:00"
-            )
 
             val startTimes = listOf("07:10", "08:10", "09:10", "10:10", "11:10", "12:10", "13:10", "14:10", "15:10", "16:10", "17:10", "18:10", "19:10", "20:10", "21:10")
 
@@ -284,6 +280,7 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
                     )
                 )
             }
+            Log.d("DatabaseCheck", "Fetched Data: $fetchedData")
             viewModel.loadAllCourses()
             isLoading = false
         }
@@ -297,67 +294,81 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
             modifier = Modifier.padding(16.dp)
         )
 
-
         if (scheduleList.isEmpty() && cookies == null) {
-            // **如果資料庫為空且沒有 cookies，則顯示 WebView 進行登入**
-            WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") {
-                cookies = it
-            }
+            WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") { cookies = it }
         } else {
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .padding(16.dp)
                     .fillMaxSize()
             ) {
-                item {
-                    Text(
-                        text = "Schedule",
-                        fontSize = 24.sp,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                }
+                Text(
+                    text = "Schedule",
+                    fontSize = 24.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
 
                 if (isLoading) {
-                    item {
-                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-                    }
+                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
                 } else if (scheduleList.isEmpty()) {
-                    item {
-                        Text(text = "No schedule found", fontSize = 14.sp)
-                    }
+                    Text(text = "No schedule found", fontSize = 14.sp)
                 } else {
-                    items(scheduleList) { course ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(6),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        // 表頭 (星期)
+                        items(6) { colIndex ->
+                            if (colIndex == 0) {
                                 Text(
-                                    text = "ID: ${course.id}",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = "課程: ${course.courseName}",
+                                    text = "",
                                     fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(8.dp)
                                 )
-                                Text(text = "老師: ${course.teacherName}", fontSize = 14.sp)
-                                Text(text = "地點: ${course.location}", fontSize = 14.sp)
-                                Text(text = "星期: ${course.weekDay}", fontSize = 14.sp)
+                            } else {
                                 Text(
-                                    text = "時間: ${course.startTime} - ${course.endTime}",
-                                    fontSize = 14.sp
+                                    text = "星期${colIndex}",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(8.dp)
                                 )
+                            }
+                        }
+
+                        // 內容 (節次 + 課表)
+                        for (realRowIndex in 0..10) { // 假設最多 10 節課
+                            item {
+                                Text(
+                                    text = "第${realRowIndex}節",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                            for (colIndex in 1..5) { // 假設一週五天
+                                val course = scheduleList.find {
+                                    val courseColIndex = it.id.dropLast(it.id.length - 1).toIntOrNull()
+                                    val courseRealRowIndex = it.id.drop(1).toIntOrNull()
+                                    courseColIndex == colIndex && courseRealRowIndex == realRowIndex
+                                }
+                                item{
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(4.dp)
+                                            .border(1.dp, Color.Gray)
+                                            .fillMaxWidth()
+                                            .height(50.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(text = course?.courseName ?: "", fontSize = 14.sp)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
-
-
         }
     }
 }
