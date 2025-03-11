@@ -35,26 +35,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun WebScraperScreen(title: String, schedule: List<Map<String, String>>) {
-    Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text(text = title, fontSize = 24.sp, modifier = Modifier.padding(bottom = 8.dp))
-        if (schedule.isEmpty()) {
-            Text(text = "No schedule found", fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
-        } else {
-            schedule.forEach { item ->
-                item.forEach { (key, value) ->
-                    Text(text = "$key: $value", fontSize = 14.sp, modifier = Modifier.padding(bottom = 4.dp))
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-        }
-    }
-}
-
 data class CourseSchedule(
     val id: String,
     val courseName: String,
+    val teacherName: String,
     val location: String,
     val weekDay: String,
     val timeslot: String
@@ -95,9 +79,7 @@ suspend fun fetchWebData(url: String, cookies: String?): List<CourseSchedule> {
 
                     val weekDay = if (colIndex in 1..7) weekDays[colIndex - 1] else "未知"
                     val timeSlot = if (realRowIndex in timeSlots.indices) timeSlots[realRowIndex] else "未知時間"
-//                    val startTime = timeSlot.split("-")[0]
-//                    val endTime = timeSlot.split("-")[1]
-2
+
                     if (title.isNotEmpty()) {
                         Log.d("WebScraper", "Extracted [$id]: $title")
                         val parsedData = parseTitle(title)
@@ -105,13 +87,14 @@ suspend fun fetchWebData(url: String, cookies: String?): List<CourseSchedule> {
                         val courseSchedule = CourseSchedule(
                             id = id,
                             courseName = parsedData["科目名稱"] ?: "未知課程",
+                            teacherName = parsedData["授課教師"] ?: "未知教師",
                             location = parsedData["場地"] ?: "未知地點",
                             weekDay = weekDay,
                             timeslot = timeSlot
 //                            startTime = startTime,
 //                            endTime = endTime
                         )
-
+                        Log.d("WebScrapper", "fetchWebData: $courseSchedule")
                         dataList.add(courseSchedule)
                     }
                 }
@@ -131,6 +114,7 @@ suspend fun fetchWebData(url: String, cookies: String?): List<CourseSchedule> {
 fun parseTitle(title: String): Map<String, String> {
     val regexMap = mapOf(
         "科目名稱" to """科目名稱：(.+?)\n""",
+        "授課教師" to """授課教師：(.+?)\n""",
         "場地" to """場地：(.+?)\n"""
     )
 
@@ -190,7 +174,9 @@ fun ScheduleScreen() {
             cookies = it
         }
     } else {
-        Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Column(modifier = Modifier
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())) {
             Text(text = "Schedule", fontSize = 24.sp, modifier = Modifier.padding(bottom = 8.dp))
             if (isLoading) {
                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))
@@ -199,12 +185,15 @@ fun ScheduleScreen() {
             } else {
                 scheduleList.forEach { course ->
                     Card(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(8.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
                             Text(text = "ID: ${course.id}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                             Text(text = "課程: ${course.courseName}", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text(text = "老師: ${course.teacherName}", fontSize = 14.sp)
                             Text(text = "地點: ${course.location}", fontSize = 14.sp)
                             Text(text = "星期: ${course.weekDay}", fontSize = 14.sp)
                             Text(text = "時間: ${course.timeslot}", fontSize = 14.sp)
