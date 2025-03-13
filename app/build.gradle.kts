@@ -66,4 +66,8 @@ dependencies {
     kapt ("androidx.room:room-compiler:2.6.1")
     implementation ("androidx.room:room-ktx:2.6.1")
 
+
+    implementation ("org.jetbrains.kotlinx:kotlinx-datetime:0.4.0")
+    implementation ("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+
 }
