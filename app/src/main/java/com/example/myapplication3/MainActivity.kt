@@ -7,6 +7,7 @@ import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -26,6 +27,7 @@ import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,10 +56,7 @@ import com.example.myapplication3.CourseDetailCard as CourseDetailCard
 import java.time.LocalTime
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-
-
-
+import kotlinx.coroutines.runBlocking
 
 
 class MainActivity : ComponentActivity() {
@@ -91,7 +90,6 @@ data class CourseEntity(
     val endTime: LocalTime   // 改為 LocalTime
 )
 
-
 @Dao
 interface CourseDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -106,7 +104,6 @@ interface CourseDao {
     @Query("DELETE FROM course_table")
     suspend fun clearAllCourses()
 }
-
 
 class Converters {
     @TypeConverter
@@ -160,6 +157,7 @@ class CourseViewModel(private val repository: CourseRepository) : ViewModel() {
     fun loadAllCourses() {
         viewModelScope.launch(Dispatchers.IO) {
             val courses = repository.getAllCourses()
+            Log.d("CourseViewModel", "Loaded courses: $courses") // 添加日誌檢查
             _allCourses.postValue(courses)
         }
     }
@@ -174,11 +172,41 @@ class CourseViewModel(private val repository: CourseRepository) : ViewModel() {
     fun clearAllCourses() {
         viewModelScope.launch(Dispatchers.IO) {
             repository.clearAllCourses()
+            _allCourses.postValue(emptyList()) // 確保 LiveData 更新為空
+            Log.d("CourseViewModel", "Cleared all courses")
         }
     }
 
     fun selectCourses(courses: List<CourseEntity>?) {
         _selectedCourses.value = courses
+    }
+
+    fun updateCourseLocation(courseId: String, newLocation: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentCourses = _allCourses.value?.toMutableList() ?: mutableListOf()
+            val courseToUpdate = currentCourses.find { it.id == courseId }
+            courseToUpdate?.let {
+                val updatedCourse = it.copy(location = newLocation)
+                repository.insert(updatedCourse)
+                val updatedCourses = currentCourses.map { course ->
+                    if (course.id == courseId) updatedCourse else course
+                }
+                _allCourses.postValue(updatedCourses)
+                _selectedCourses.value?.let { selected ->
+                    val updatedSelected = selected.map { course ->
+                        if (course.id == courseId) updatedCourse else course
+                    }
+                    _selectedCourses.postValue(updatedSelected)
+                }
+            }
+        }
+    }
+
+    // 新增方法：檢查資料庫是否有數據
+    fun hasDataInDatabase(): Boolean {
+        return runBlocking(Dispatchers.IO) {
+            repository.getAllCourses().isNotEmpty()
+        }
     }
 }
 
@@ -212,21 +240,20 @@ suspend fun fetchWebData(url: String, cookies: String?): List<CourseEntity> {
                 for ((colIndex, column) in columns.withIndex()) {
                     val span = column.selectFirst("span[title]")
                     val title = span?.attr("title")?.trim() ?: ""
-                    val realRowIndex = rowIndex
 
-                    if (realRowIndex >= startTimes.size) continue
+                    if (rowIndex >= startTimes.size) continue
 
                     val weekDay = if (colIndex in 1..7) weekDays[colIndex - 1] else "未知"
-                    val startTime = startTimes[realRowIndex] // 未調整的原始時間
-                    val endTime = endTimes[realRowIndex]
+                    val startTime = startTimes[rowIndex] // 未調整的原始時間
+                    val endTime = endTimes[rowIndex]
 
                     if (title.isNotEmpty()) {
                         val parsedData = parseTitle(title)
                         val courseSchedule = CourseEntity(
-                            id = "$colIndex$realRowIndex",
+                            id = "$colIndex$rowIndex",
                             courseName = parsedData["科目名稱"] ?: "未知課程",
                             teacherName = parsedData["授課教師"] ?: "未知教師",
-                            location = parsedData["場地"] ?: "未知地點",
+                            location = parsedData["場地"] ?: "其它",
                             weekDay = weekDay,
                             startTime = startTime,
                             endTime = endTime
@@ -324,7 +351,7 @@ fun WebViewScreen(url: String, onLoginSuccess: (String) -> Unit) {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     if (url.contains("InfoLoginNew.aspx")) {
-                        view.scrollTo(0, 0)
+                        view.scrollTo(0, -100)
                         return
                     }
                     val cookies = CookieManager.getInstance().getCookie(url)
@@ -340,30 +367,44 @@ fun WebViewScreen(url: String, onLoginSuccess: (String) -> Unit) {
 fun ScheduleScreen(viewModel: CourseViewModel) {
     var cookies by remember { mutableStateOf<String?>(null) }
     val scheduleList by viewModel.allCourses.observeAsState(emptyList())
-    val selectedCourses by viewModel.selectedCourses.observeAsState(null) // 從 ViewModel 獲取
+    val selectedCourses by viewModel.selectedCourses.observeAsState(null)
     var isLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) { viewModel.loadAllCourses() }
+    val onCourseSelected = remember(viewModel) {
+        { courses: List<CourseEntity>? -> viewModel.selectCourses(courses) }
+    }
+
+    // 初始載入已有數據
+    LaunchedEffect(Unit) {
+        viewModel.loadAllCourses()
+    }
+
+    // 當 cookies 更新時執行刷新
     LaunchedEffect(cookies) {
-        if (cookies != null && scheduleList.isEmpty()) {
+        if (cookies != null) {
             isLoading = true
             val fetchedData = fetchWebData(
                 "https://infosys.nttu.edu.tw/n_CourseBase_Select/WeekCourseList.aspx?ItemParam=",
                 cookies!!
             )
             if (fetchedData.isNotEmpty()) {
+                // 只有成功獲取新數據時才清除舊數據
                 viewModel.clearAllCourses()
                 fetchedData.forEach { viewModel.insertCourse(it) }
+                viewModel.loadAllCourses()
+            } else {
+                Log.d("ScheduleScreen", "No new data fetched, keeping existing data")
             }
             isLoading = false
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 頂部標題和刷新按鈕
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -375,15 +416,11 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
             )
             Button(
                 onClick = {
-                    cookies?.let { cookiesValue ->
-                        coroutineScope.launch {
-                            isLoading = true
-                            fetchNewData(viewModel, cookiesValue)
-                            isLoading = false
-                        }
+                    coroutineScope.launch {
+                        isLoading = true
+                        cookies = null // 觸發重新登入
                     }
                 },
-                enabled = cookies != null,
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
             ) {
                 if (isLoading) {
@@ -397,22 +434,138 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
             }
         }
 
-        // 根據條件顯示 WebView 或表格
-        if (scheduleList.isEmpty() && cookies == null) {
-            WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") { cookies = it }
+        if (cookies == null) {
+            WebViewScreen("https://infosys.nttu.edu.tw/InfoLoginNew.aspx") { newCookies ->
+                cookies = newCookies
+            }
         } else {
-            ScheduleTable(
-                scheduleList = scheduleList,
-                onCourseSelected = { courses -> viewModel.selectCourses(courses) }
-            )
-            // 詳情卡片獨立顯示
-            selectedCourses?.let { courses ->
-                Spacer(modifier = Modifier.height(16.dp))
-                CourseDetailCard(courses = courses)
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    ScheduleTable(
+                        scheduleList = scheduleList,
+                        onCourseSelected = onCourseSelected
+                    )
+                }
+                selectedCourses?.let { courses ->
+                    Spacer(modifier = Modifier.height(16.dp))
+                    CourseDetailCard(
+                        courses = courses,
+                        viewModel = viewModel,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight()
+                    )
+                }
             }
         }
     }
 }
+
+@Composable
+fun CourseDetailCard(
+    courses: List<CourseEntity>,
+    viewModel: CourseViewModel,
+    modifier: Modifier = Modifier // 添加 modifier 參數
+) {
+    if (courses.isEmpty()) return
+
+    val context = LocalContext.current
+    var showEditDialog by remember { mutableStateOf(false) }
+    var newLocation by remember { mutableStateOf("") }
+
+    Card(
+        modifier = modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clickable {
+                if (courses.any { it.location == "其它" }) {
+                    showEditDialog = true
+                } else {
+                    Toast.makeText(context, "只有地點為「其它」的課程可以編輯", Toast.LENGTH_SHORT).show()
+                }
+            },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "課程: ${courses.first().courseName}",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "老師: ${courses.map { it.teacherName }.distinct().joinToString(", ")}",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "地點: ${courses.map { it.location }.distinct().joinToString(", ")}",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "時間安排:",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            courses.forEach { course ->
+                Text(
+                    text = "${course.weekDay} ${course.startTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))} - ${course.endTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, top = 4.dp)
+                )
+            }
+        }
+    }
+
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("編輯地點") },
+            text = {
+                TextField(
+                    value = newLocation,
+                    onValueChange = { newLocation = it },
+                    label = { Text("輸入新地點") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newLocation.isNotBlank()) {
+                            courses.filter { it.location == "其它" }.forEach { course ->
+                                viewModel.updateCourseLocation(course.id, newLocation)
+                            }
+                            showEditDialog = false
+                            newLocation = ""
+                        }
+                    }
+                ) {
+                    Text("確定")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { showEditDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+}
+
+
+
+
 
 @Composable
 fun ScheduleTable(
@@ -560,56 +713,6 @@ fun ScheduleTable(
 }
 
 
-
-
-@Composable
-fun CourseDetailCard(courses: List<CourseEntity>) {
-    if (courses.isEmpty()) return
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "課程: ${courses.first().courseName}",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "老師: ${courses.map { it.teacherName }.distinct().joinToString(", ")}",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = "地點: ${courses.map { it.location }.distinct().joinToString(", ")}",
-                fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "時間安排:",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            courses.forEach { course ->
-                Text(
-                    text = "${course.weekDay} ${course.startTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))} - ${course.endTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 16.dp, top = 4.dp)
-                )
-            }
-        }
-    }
-}
 
 suspend fun fetchNewData(viewModel: CourseViewModel, cookies: String) {
     val fetchedData = fetchWebData(
