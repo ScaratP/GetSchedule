@@ -56,6 +56,7 @@ import com.example.myapplication3.CourseDetailCard as CourseDetailCard
 import java.time.LocalTime
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 
 
@@ -154,25 +155,25 @@ class CourseViewModel(private val repository: CourseRepository) : ViewModel() {
     private val _selectedCourses = MutableLiveData<List<CourseEntity>?>(null)
     val selectedCourses: LiveData<List<CourseEntity>?> get() = _selectedCourses
 
-    fun loadAllCourses() {
-        viewModelScope.launch(Dispatchers.IO) {
+    fun loadAllCourses(): Job {
+        return viewModelScope.launch(Dispatchers.IO) {
             val courses = repository.getAllCourses()
-            Log.d("CourseViewModel", "Loaded courses: $courses") // 添加日誌檢查
+            Log.d("CourseViewModel", "Loaded courses: $courses")
             _allCourses.postValue(courses)
         }
     }
 
-    fun insertCourse(course: CourseEntity) {
-        viewModelScope.launch(Dispatchers.IO) {
+    fun insertCourse(course: CourseEntity): Job {
+        return viewModelScope.launch(Dispatchers.IO) {
             repository.insert(course)
             Log.d("DatabaseCheck", "Inserted Course: $course")
         }
     }
 
-    fun clearAllCourses() {
-        viewModelScope.launch(Dispatchers.IO) {
+    fun clearAllCourses(): Job {
+        return viewModelScope.launch(Dispatchers.IO) {
             repository.clearAllCourses()
-            _allCourses.postValue(emptyList()) // 確保 LiveData 更新為空
+            _allCourses.postValue(emptyList())
             Log.d("CourseViewModel", "Cleared all courses")
         }
     }
@@ -202,11 +203,8 @@ class CourseViewModel(private val repository: CourseRepository) : ViewModel() {
         }
     }
 
-    // 新增方法：檢查資料庫是否有數據
-    fun hasDataInDatabase(): Boolean {
-        return runBlocking(Dispatchers.IO) {
-            repository.getAllCourses().isNotEmpty()
-        }
+    fun hasCourses(): Boolean {
+        return _allCourses.value?.isNotEmpty() == true
     }
 }
 
@@ -375,27 +373,27 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
         { courses: List<CourseEntity>? -> viewModel.selectCourses(courses) }
     }
 
-    // 初始載入已有數據
+    // 初始載入已有數據，並決定是否需要登入
     LaunchedEffect(Unit) {
-        viewModel.loadAllCourses()
+        // 等待 loadAllCourses 完成
+        viewModel.loadAllCourses().join()
+        if (!viewModel.hasCourses()) {
+            // 如果資料庫為空，觸發登入
+            cookies = null
+            Log.d("ScheduleScreen", "No data in database, triggering login")
+        } else {
+            // 如果資料庫有資料，跳過登入
+            Log.d("ScheduleScreen", "App restarted with existing data, skipping login")
+            cookies = "existing"
+        }
     }
 
     // 當 cookies 更新時執行刷新
     LaunchedEffect(cookies) {
-        if (cookies != null) {
+        if (cookies != null && cookies != "existing") {
             isLoading = true
-            val fetchedData = fetchWebData(
-                "https://infosys.nttu.edu.tw/n_CourseBase_Select/WeekCourseList.aspx?ItemParam=",
-                cookies!!
-            )
-            if (fetchedData.isNotEmpty()) {
-                // 只有成功獲取新數據時才清除舊數據
-                viewModel.clearAllCourses()
-                fetchedData.forEach { viewModel.insertCourse(it) }
-                viewModel.loadAllCourses()
-            } else {
-                Log.d("ScheduleScreen", "No new data fetched, keeping existing data")
-            }
+            fetchNewData(viewModel, cookies!!)
+            Log.d("ScheduleScreen", "Data fetch completed")
             isLoading = false
         }
     }
@@ -418,7 +416,7 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
                 onClick = {
                     coroutineScope.launch {
                         isLoading = true
-                        cookies = null // 觸發重新登入
+                        cookies = null // 觸發重新登入並強制抓取
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
@@ -464,6 +462,7 @@ fun ScheduleScreen(viewModel: CourseViewModel) {
         }
     }
 }
+
 
 @Composable
 fun CourseDetailCard(
@@ -562,10 +561,6 @@ fun CourseDetailCard(
         )
     }
 }
-
-
-
-
 
 @Composable
 fun ScheduleTable(
@@ -720,8 +715,20 @@ suspend fun fetchNewData(viewModel: CourseViewModel, cookies: String) {
         cookies
     )
     if (fetchedData.isNotEmpty()) {
-        viewModel.clearAllCourses()
-        fetchedData.forEach { viewModel.insertCourse(it) }
-        viewModel.loadAllCourses()
+        withContext(Dispatchers.IO) {
+            // 清除資料並等待完成
+            viewModel.clearAllCourses().join()
+            Log.d("fetchNewData", "All courses cleared")
+
+            // 依次插入新資料
+            fetchedData.forEach { course ->
+                viewModel.insertCourse(course).join() // 確保每個插入操作完成
+                Log.d("fetchNewData", "Inserted course: $course")
+            }
+
+            // 加載更新後的資料
+            viewModel.loadAllCourses().join()
+            Log.d("fetchNewData", "Courses loaded")
+        }
     }
 }
